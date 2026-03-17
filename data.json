@@ -1,7 +1,8 @@
 {
   "days": {
     "2026-03-16": {
-      "minU": "done"
+      "minU": "done",
+      "rinfo": "done"
     }
   },
   "vitCount": 33
