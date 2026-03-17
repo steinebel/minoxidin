@@ -4,7 +4,8 @@
       "minU": "done",
       "rinfo": "missed",
       "dercos": "missed",
-      "minV": "done"
+      "minV": "done",
+      "vit": "done"
     }
   },
   "vitCount": 33
