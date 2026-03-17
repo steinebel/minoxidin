@@ -3,7 +3,8 @@
     "2026-03-16": {
       "minU": "done",
       "rinfo": "missed",
-      "dercos": "done"
+      "dercos": "missed",
+      "minV": "done"
     }
   },
   "vitCount": 33
