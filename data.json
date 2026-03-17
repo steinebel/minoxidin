@@ -2,7 +2,8 @@
   "days": {
     "2026-03-16": {
       "minU": "done",
-      "rinfo": "done"
+      "rinfo": "missed",
+      "dercos": "done"
     }
   },
   "vitCount": 33
