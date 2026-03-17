@@ -1,0 +1,333 @@
+
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: var(--font-sans); }
+
+.tracker { padding: 1rem 0; }
+
+.day-header {
+  display: flex; align-items: baseline; gap: 10px;
+  margin-bottom: 1.25rem;
+}
+.day-title { font-size: 20px; font-weight: 500; color: var(--color-text-primary); }
+.day-sub { font-size: 13px; color: var(--color-text-secondary); }
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 8px;
+  margin-bottom: 1rem;
+}
+
+.card {
+  background: var(--color-background-primary);
+  border: 0.5px solid var(--color-border-tertiary);
+  border-radius: var(--border-radius-lg);
+  padding: 12px;
+  cursor: pointer;
+  transition: border-color 0.15s;
+  user-select: none;
+  min-height: 80px;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.card:hover { border-color: var(--color-border-secondary); }
+
+.card-label { font-size: 12px; color: var(--color-text-secondary); }
+.card-status { font-size: 22px; font-weight: 500; }
+
+.card.done {
+  background: #EAF3DE;
+  border-color: #639922;
+}
+.card.done .card-label { color: #3B6D11; }
+.card.done .card-status { color: #27500A; }
+
+.card.missed {
+  background: #FCEBEB;
+  border-color: #E24B4A;
+}
+.card.missed .card-label { color: #A32D2D; }
+.card.missed .card-status { color: #791F1F; }
+
+.card.skipped {
+  background: var(--color-background-secondary);
+  border-color: var(--color-border-tertiary);
+  opacity: 0.5;
+  cursor: default;
+}
+.card.skipped .card-status { color: var(--color-text-tertiary); }
+
+.card.pending {
+  border-color: var(--color-border-secondary);
+}
+
+.vit-input {
+  font-size: 20px; font-weight: 500;
+  border: none; background: transparent;
+  width: 60px; color: inherit;
+  outline: none;
+  padding: 0;
+}
+
+.roller-banner {
+  background: #FAEEDA;
+  border: 0.5px solid #BA7517;
+  border-radius: var(--border-radius-lg);
+  padding: 10px 14px;
+  font-size: 13px;
+  color: #633806;
+  margin-bottom: 1rem;
+  display: flex; align-items: center; gap: 8px;
+}
+
+.nav { display: flex; align-items: center; gap: 12px; margin-bottom: 1.25rem; }
+.nav button {
+  font-size: 13px; padding: 4px 12px;
+  border-radius: var(--border-radius-md);
+}
+.nav-date { font-size: 14px; font-weight: 500; color: var(--color-text-primary); flex: 1; text-align: center; }
+
+.legend { font-size: 12px; color: var(--color-text-tertiary); margin-top: 0.75rem; }
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 3px; }
+.dot.green { background: #639922; }
+.dot.red { background: #E24B4A; }
+</style>
+
+<div class="tracker">
+  <div class="nav">
+    <button id="prevBtn">←</button>
+    <div class="nav-date" id="navDate"></div>
+    <button id="nextBtn">→</button>
+  </div>
+
+  <div id="rollerBanner" class="roller-banner" style="display:none">
+    ⚠ Роллер перенесён с 16.03 — запланирован на сегодня вечером
+  </div>
+
+  <div class="day-header">
+    <div class="day-title" id="dayTitle"></div>
+    <div class="day-sub" id="daySub"></div>
+  </div>
+
+  <div class="grid" id="cardsGrid"></div>
+
+  <div class="legend">
+    <span class="dot green"></span>выполнено &nbsp;
+    <span class="dot red"></span>пропущено &nbsp;
+    серый — не запланировано
+  </div>
+</div>
+
+<script>
+const STORAGE_KEY = 'minox_v1';
+
+const DAYS_RU = ['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
+const MONTHS_RU = ['января','февраля','марта','апреля','мая','июня',
+                   'июля','августа','сентября','октября','ноября','декабря'];
+
+function ymd(d) {
+  return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+}
+function parseYmd(s) {
+  const [y,m,d] = s.split('-').map(Number);
+  return new Date(y, m-1, d);
+}
+
+// ── Начальное состояние ──────────────────────────────────────────────
+// Роллер пропущен 16.03, перенесён на 17.03
+const START_DATE = new Date(2026, 2, 17); // 17 марта
+const ROLLER_DOW = 1; // Понедельник (1 = Пн в getDay())
+const DERCOS_DOW = new Set([1, 3, 6]); // Пн, Ср, Сб
+
+function getState() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? JSON.parse(raw) : { days: {}, vitCount: 33 };
+  } catch(e) { return { days: {}, vitCount: 33 }; }
+}
+function saveState(s) {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(s)); } catch(e) {}
+}
+
+// ── Что запланировано в день ─────────────────────────────────────────
+function getSchedule(date) {
+  const dow = date.getDay(); // 0=Вс
+  const key = ymd(date);
+
+  // Особый случай: 17.03 роллер перенесён с 16.03
+  const isRollerDay = (key === '2026-03-17') || (dow === ROLLER_DOW && key !== '2026-03-17' && dow !== 0);
+  // Логика: роллер по понедельникам, но 17.03 (вт) тоже роллер (перенос)
+  // и 23.03 (следующий пн) — обычный роллер
+  function isRoller(d) {
+    const k = ymd(d);
+    if (k === '2026-03-17') return true; // перенос
+    if (k === '2026-03-16') return false; // пропущен
+    return d.getDay() === ROLLER_DOW;
+  }
+  function isPauseDay(d) {
+    const prev = new Date(d); prev.setDate(prev.getDate() - 1);
+    return isRoller(prev);
+  }
+
+  const roller = isRoller(date);
+  const pause  = !roller && isPauseDay(date);
+  const dercos = DERCOS_DOW.has(dow);
+
+  return {
+    minU:   roller || pause ? 'skip' : 'plan',
+    rinfo:  roller || pause ? 'skip' : 'plan',
+    dercos: dercos ? 'plan' : 'skip',
+    minV:   roller ? 'skip' : 'plan',  // в день роллера вечер тоже пауза (роллер вечером)
+    roller: roller ? 'plan' : 'skip',
+    vit:    'plan',
+  };
+}
+
+// ── UI ───────────────────────────────────────────────────────────────
+let currentDate = new Date(START_DATE);
+
+const ITEMS = [
+  { id: 'minU',   label: 'Мин утро' },
+  { id: 'rinfo',  label: 'Ринфолтил' },
+  { id: 'dercos', label: 'Dercos' },
+  { id: 'minV',   label: 'Мин вечер' },
+  { id: 'roller', label: 'Роллер' },
+  { id: 'vit',    label: 'Витамины' },
+];
+
+function getVitCountForDate(date, state) {
+  // Считаем остаток витаминок на дату, начиная от 17.03 = 33
+  let count = state.vitCount !== undefined ? state.vitCount : 33;
+  // vitCount хранит актуальный остаток на сегодня (START_DATE)
+  // для прошлого/будущего пересчитываем по записям
+  const targetKey = ymd(date);
+  const startKey  = ymd(START_DATE);
+
+  // Собираем все даты с записями
+  const allKeys = Object.keys(state.days).sort();
+
+  // Если дата = сегодня, возвращаем базовое значение (vitCount)
+  // Если в прошлом — смотрим что было записано
+  // Если в будущем — прогноз (каждый запланированный день -1)
+  // Простой подход: vitCount = остаток НА 17.03 до отметки дня
+  return null; // будет вычислено в render
+}
+
+function computeVitOnDate(date, state) {
+  const targetKey = ymd(date);
+  const startKey  = ymd(START_DATE);
+  let count = state.vitCount !== undefined ? state.vitCount : 33;
+
+  // Для каждой даты от start до target (включая target) применяем записи
+  const cur = new Date(START_DATE);
+  while (ymd(cur) <= targetKey) {
+    const k = ymd(cur);
+    if (k > startKey) {
+      // день уже после старта — смотрим запись
+      const rec = state.days[k];
+      if (rec && rec.vit === 'done') count--;
+      else if (rec && rec.vit === 'missed') { /* не меняем */ }
+      else if (k < targetKey) count--; // будущий незаписанный = прогноз -1
+    }
+    const nx = new Date(cur); nx.setDate(nx.getDate() + 1);
+    cur.setDate(cur.getDate() + 1);
+  }
+  return Math.max(0, count);
+}
+
+function render() {
+  const state = getState();
+  const key = ymd(currentDate);
+  const sched = getSchedule(currentDate);
+  const rec = state.days[key] || {};
+  const isToday = ymd(currentDate) === ymd(new Date());
+  const isFuture = currentDate > new Date();
+
+  // Шапка
+  const dow = DAYS_RU[currentDate.getDay()];
+  document.getElementById('dayTitle').textContent =
+    currentDate.getDate() + ' ' + MONTHS_RU[currentDate.getMonth()] + ', ' + dow;
+  document.getElementById('daySub').textContent =
+    isToday ? 'сегодня' : (isFuture ? 'будущее' : 'прошлое');
+  document.getElementById('navDate').textContent = key.split('-').reverse().join('.');
+
+  // Баннер роллера только 17.03
+  document.getElementById('rollerBanner').style.display =
+    (key === '2026-03-17') ? 'flex' : 'none';
+
+  // Витамины
+  const vitBase = computeVitOnDate(currentDate, state);
+
+  const grid = document.getElementById('cardsGrid');
+  grid.innerHTML = '';
+
+  ITEMS.forEach(item => {
+    const plan = sched[item.id];
+    const recVal = rec[item.id];
+
+    let cls = 'card';
+    let statusText = '';
+    let clickable = !isFuture && plan === 'plan';
+
+    if (plan === 'skip') {
+      cls += ' skipped';
+      statusText = '—';
+    } else if (recVal === 'done') {
+      cls += ' done';
+      statusText = item.id === 'vit' ? String(vitBase) : '✓';
+    } else if (recVal === 'missed') {
+      cls += ' missed';
+      statusText = item.id === 'vit' ? String(vitBase + 1) : '✗';
+    } else {
+      cls += ' pending';
+      statusText = item.id === 'vit' ? String(vitBase) : '·';
+    }
+
+    const card = document.createElement('div');
+    card.className = cls;
+    card.innerHTML = `<div class="card-label">${item.label}</div><div class="card-status">${statusText}</div>`;
+
+    if (clickable) {
+      card.addEventListener('click', () => toggleItem(key, item.id, recVal, plan));
+    }
+    grid.appendChild(card);
+  });
+}
+
+function toggleItem(key, itemId, current, plan) {
+  if (plan !== 'plan') return;
+  const state = getState();
+  if (!state.days[key]) state.days[key] = {};
+
+  if (!current || current === 'pending') {
+    state.days[key][itemId] = 'done';
+    // Если это витамины и это стартовый день — уменьшаем базовый счётчик
+    if (itemId === 'vit' && key === ymd(START_DATE)) {
+      state.vitCount = Math.max(0, (state.vitCount || 33) - 1);
+    }
+  } else if (current === 'done') {
+    state.days[key][itemId] = 'missed';
+    if (itemId === 'vit' && key === ymd(START_DATE)) {
+      state.vitCount = Math.min(99, (state.vitCount || 33) + 1);
+    }
+  } else {
+    // missed → убрать запись
+    delete state.days[key][itemId];
+    if (itemId === 'vit' && key === ymd(START_DATE)) {
+      // восстанавливаем
+    }
+  }
+
+  saveState(state);
+  render();
+}
+
+document.getElementById('prevBtn').addEventListener('click', () => {
+  currentDate = new Date(currentDate); currentDate.setDate(currentDate.getDate() - 1); render();
+});
+document.getElementById('nextBtn').addEventListener('click', () => {
+  currentDate = new Date(currentDate); currentDate.setDate(currentDate.getDate() + 1); render();
+});
+
+render();
+</script>
