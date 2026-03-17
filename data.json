@@ -7,7 +7,9 @@
       "minV": "done",
       "vit": "done"
     },
-    "2026-03-17": {}
+    "2026-03-17": {
+      "vit": "done"
+    }
   },
-  "vitCount": 33
+  "vitCount": 32
 }
